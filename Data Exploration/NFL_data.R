@@ -1,22 +1,44 @@
+## IMPORT PACKAGES
 require(data.table)
 require(glue)
 require(ggplot2)
 
-## DATA COLLECTION
-
-# Import all NFL GAMES available in master-data-set
+##$$##$$## DATA IMPORT
+#### NFL GAMES
 file.games = "https://raw.githubusercontent.com/nfl-football-ops/Big-Data-Bowl/master/Data/games.csv"
 games = fread(file.games)
+
+dim(games)
+colnames(games)
+head(games)
+games[,.N,by=list(season, week)]
+
+
+#### NFL PLAYS
+file.plays = "https://raw.githubusercontent.com/nfl-football-ops/Big-Data-Bowl/master/Data/plays.csv"
+plays = fread(file.plays)
+
+dim(plays)
+colnames(plays)
+head(plays)
+plays[,.N,by=gameId][order(-N)]
+
+
+#### NFL PLAYERS
+file.players = "https://raw.githubusercontent.com/nfl-football-ops/Big-Data-Bowl/master/Data/players.csv"
+players = fread(file.players)
+
+dim(players)
+colnames(players)
+head(players)
+players[,.N,by=College][order(-N)]
+
+
+##$$##$$## DATA CLEAN -- NYG
 games.nyg = games[homeTeamAbbr == "NYG" | visitorTeamAbbr == "NYG",]
 games.nyg.loc = games.nyg[,.(gameId, loc = ifelse(homeTeamAbbr == "NYG", "home","away"))]
 games.nyg.ids = games.nyg$gameId
-
-# Import all NFL PLAYS
-file.plays = "https://raw.githubusercontent.com/nfl-football-ops/Big-Data-Bowl/master/Data/plays.csv"
-plays = fread(file.plays) 
 plays.nyg = plays[gameId %in% games.nyg.ids,]
-
-# Import player tracking information for NYG games
 tracking.nyg = data.table()
 for (i in 1:length(games.nyg.ids)) {
   game.id = games.nyg.ids[i]
@@ -27,11 +49,21 @@ for (i in 1:length(games.nyg.ids)) {
   tracking.nyg = rbindlist(list(tracking.nyg,tracking.temp))  
 }
 
-## EXPLORATION
-players.nyg = unique(tracking.nyg[team.flag == team,.(nflId,displayName)])
-plays.nyg
+players.nyg = merge(x = unique(tracking.nyg[team.flag == team,.(nflId,displayName)]),
+                    y = players,
+                    all.x = TRUE,
+                    by.x = "nflId",
+                    by.y = "nflId")
 
-# OBJ == 2543496
+##$$##$$## DATA EXPLORATION
+
+## PLAYER PROFILES
+players.top.colleges = players[,.N,by=College][order(-N)][1:20]
+players.heat = players[College %in% players.top.colleges$College,.(count = .N),by=list(College, PositionAbbr)]
+players.heat$class = ifelse(players.heat$count >= 5, "top", ifelse(players.heat$count >= 3, "mid", "low"))
+ggplot(players.heat, aes(PositionAbbr, College)) + 
+  geom_tile(aes(fill = class)) +
+  scale_fill_manual(values=c("#e0e6ee", "#f4f293", "#0bcd72"))
 
 
 tracking.player.v1 = tracking.nyg[nflId == "2543496",]
