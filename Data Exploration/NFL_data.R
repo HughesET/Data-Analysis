@@ -4,6 +4,7 @@ require(glue)
 require(ggplot2)
 
 ##$$##$$## DATA IMPORT
+
 #### NFL GAMES
 file.games = "https://raw.githubusercontent.com/nfl-football-ops/Big-Data-Bowl/master/Data/games.csv"
 games = fread(file.games)
@@ -17,6 +18,7 @@ games[,.N,by=list(season, week)]
 #### NFL PLAYS
 file.plays = "https://raw.githubusercontent.com/nfl-football-ops/Big-Data-Bowl/master/Data/plays.csv"
 plays = fread(file.plays)
+plays$gameplayId = paste(plays$gameId, plays$playId, sep="-")
 
 dim(plays)
 colnames(plays)
@@ -28,6 +30,7 @@ plays[,.N,by=gameId][order(-N)]
 file.players = "https://raw.githubusercontent.com/nfl-football-ops/Big-Data-Bowl/master/Data/players.csv"
 players = fread(file.players)
 
+
 dim(players)
 colnames(players)
 head(players)
@@ -35,6 +38,7 @@ players[,.N,by=College][order(-N)]
 
 
 ##$$##$$## DATA CLEAN -- NYG
+
 games.nyg = games[homeTeamAbbr == "NYG" | visitorTeamAbbr == "NYG",]
 games.nyg.loc = games.nyg[,.(gameId, loc = ifelse(homeTeamAbbr == "NYG", "home","away"))]
 games.nyg.ids = games.nyg$gameId
@@ -42,10 +46,12 @@ plays.nyg = plays[gameId %in% games.nyg.ids,]
 tracking.nyg = data.table()
 for (i in 1:length(games.nyg.ids)) {
   game.id = games.nyg.ids[i]
-  team.flag = games.nyg.loc$loc[i]
   file.tracking = glue("https://raw.githubusercontent.com/nfl-football-ops/Big-Data-Bowl/master/Data/tracking_gameId_{game.id}.csv")
   tracking.temp = fread(file.tracking)
+  team.flag = ifelse(tracking.temp$displayName == "football", "football", games.nyg.loc$loc[i])
   tracking.temp$team.flag = team.flag
+  tracking.temp$gameplayId = paste(tracking.temp$gameId,tracking.temp$playId,sep="-")
+  
   tracking.nyg = rbindlist(list(tracking.nyg,tracking.temp))  
 }
 
@@ -54,6 +60,44 @@ players.nyg = merge(x = unique(tracking.nyg[team.flag == team,.(nflId,displayNam
                     all.x = TRUE,
                     by.x = "nflId",
                     by.y = "nflId")
+
+## Clean Data Sets
+
+possession.nyg = plays.nyg[GameClock == "15:00:00" & quarter == 1 & isSTPlay == TRUE,
+                           .(gameId, gameplayId, ballfirst = ifelse(possessionTeam == "NYG", TRUE, FALSE))]
+
+df.nyg.v1 = merge(x=tracking.nyg,
+                  y=merge(x=plays.nyg, y=possession.nyg, by.x="gameplayId", by.y="gameplayId")[,.(gameId = gameId.x,
+                                                                                                  quarter,
+                                                                                                  yardlineSide,
+                                                                                                  ballfirst)],
+                  all.x=TRUE,
+                  by.x="gameId",
+                  by.y="gameId")
+
+df.nyg.v2 = df.nyg.v1[,.(nflId,
+                         event,
+                         quarter,
+                         adj_x = ifelse(ballfirst == TRUE,
+                                        ifelse(quarter == 2 | quarter == 4,
+                                               ifelse(yardlineSide == "NYG", (160/3)-y, y),
+                                               ifelse(yardlineSide == "NYG", y, (160/3)-y)),
+                                        ifelse(quarter == 2 | quarter == 4,
+                                              ifelse(yardlineSide == "NYG", y, (160/3)-y),
+                                              ifelse(yardlineSide == "NYG", (160/3)-y, y))
+                         ),
+                         adj_y = ifelse(ballfirst == TRUE,
+                                        ifelse(quarter == 2 | quarter == 4,
+                                               ifelse(yardlineSide == "NYG", x, (120)-x),
+                                               ifelse(yardlineSide == "NYG", (120)-x, x)),
+                                        ifelse(quarter == 2 | quarter == 4,
+                                               ifelse(yardlineSide == "NYG", (120)-x, x),
+                                               ifelse(yardlineSide == "NYG", x, (120)-x))),
+                         gameId = as.factor(gameId),
+                         gameplayId)]
+
+
+ggplot(data = df.nyg.v2, aes(x=adj_x, y=adj_y)) + geom_point()
 
 ##$$##$$## DATA EXPLORATION
 
@@ -64,6 +108,51 @@ players.heat$class = ifelse(players.heat$count >= 5, "top", ifelse(players.heat$
 ggplot(players.heat, aes(PositionAbbr, College)) + 
   geom_tile(aes(fill = class)) +
   scale_fill_manual(values=c("#e0e6ee", "#f4f293", "#0bcd72"))
+
+## PLAYERS CATCHES
+
+
+## FIELD GOALS
+plays.fg = merge(x=plays[SpecialTeamsPlayType == "Field Goal" & isPenalty == FALSE,],
+                 y=games[,.(gameId, homeTeamAbbr)],
+                 by.x="gameId",
+                 by.y="gameId",
+                 all.x=TRUE)
+
+plays.fg$fgDistance = ifelse(plays.fg$possessionTeam == plays.fg$yardlineSide,
+                             plays.fg$yardlineNumber + 67,
+                             plays.fg$yardlineNumber + 17)
+
+plays.fg$isGood = ifelse(plays.fg$possessionTeam == plays.fg$homeTeamAbbr,
+                         ifelse(plays.fg$HomeScoreAfterPlay > plays.fg$HomeScoreBeforePlay,
+                                TRUE,
+                                FALSE),
+                         ifelse(plays.fg$VisitorScoreAfterPlay > plays.fg$VisitorScoreBeforePlay,
+                                TRUE,
+                                FALSE))
+
+plays.fg.attempts = merge(x=plays.fg,
+                          y=df.nyg.v2[nflId == "2556771" & event == "field_goal",],
+                          by.x="gameplayId",
+                          by.y="gameplayId")
+
+
+ggplot(data = plays.fg.attempts, aes(adj_x, adj_y)) + geom_point() +
+  xlim(0, (160/3)) +
+  ylim(0, 120) +
+  geom_hline(yintercept = c(0,10,60,110,120)) +
+  geom_hline(yintercept = c(0,10,60,110,120)) +
+  geom_vline(xintercept = c(0,160/3)) + 
+  annotate("rect", ymin = 0, ymax = 10, xmin = 0, xmax = (160/3), fill = "#0d46bf", alpha = .3) +
+  annotate("rect", ymin = 110, ymax = 120, xmin = 0, xmax = (160/3), fill = "#0d46bf", alpha = .3) +
+  annotate("rect", ymin = 10, ymax = 110, xmin = 0, xmax = (160/3), fill = "green", alpha = .3) +
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.title.y=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks.y=element_blank(),
+        legend.position="none")
 
 
 tracking.player.v1 = tracking.nyg[nflId == "2543496",]
