@@ -45,14 +45,14 @@ games.team.loc = games.team[,.(gameId, loc = ifelse(homeTeamAbbr == teamAbbr, "h
 games.team.ids = games.team$gameId
 plays.team = plays[gameId %in% games.team.ids,]
 tracking.team = data.table()
-for (i in 1:length(games.nyg.ids)) {
+for (i in 1:length(games.team.ids)) {
   game.id = games.team.ids[i]
   file.tracking = glue("https://raw.githubusercontent.com/nfl-football-ops/Big-Data-Bowl/master/Data/tracking_gameId_{game.id}.csv")
   tracking.temp = fread(file.tracking)
-  team.flag = ifelse(tracking.temp$displayName == "football", "football", games.nyg.loc$loc[i])
+  team.flag = ifelse(tracking.temp$displayName == "football", "football", games.team.loc$loc[i])
   tracking.temp$team.flag = team.flag
-  tracking.temp$gameplayId = paste(tracking.temp$gameId,tracking.temp$playId,sep="-")
-  tracking.team = rbindlist(list(tracking.nyg,tracking.temp))  
+  tracking.temp$gameplayId = paste(tracking.temp$gameId, tracking.temp$playId,sep="-")
+  tracking.team = rbindlist(list(tracking.team, tracking.temp))  
 }
 
 players.team = merge(x = unique(tracking.team[team.flag == team,.(nflId,displayName)]),
@@ -61,45 +61,41 @@ players.team = merge(x = unique(tracking.team[team.flag == team,.(nflId,displayN
                     by.x = "nflId",
                     by.y = "nflId")
 
-
-# 2558250
-
 ## Clean Data Sets
+possession.team = plays.team[GameClock == "15:00:00" & quarter == 1 & isSTPlay == TRUE,
+                           .(gameId, ballfirst = ifelse(possessionTeam == teamAbbr, FALSE, TRUE))]
 
-possession.nyg = plays.nyg[GameClock == "15:00:00" & quarter == 1 & isSTPlay == TRUE,
-                           .(gameId, ballfirst = ifelse(possessionTeam == "NYG", FALSE, TRUE))]
-
-df.nyg.v1 = merge(x = merge(x=tracking.nyg,
-                            y=plays.nyg[,.(gameplayId, yardlineSide, quarter)],
+df.team.v1 = merge(x = merge(x=tracking.team,
+                            y=plays.team[,.(gameplayId, yardlineSide, quarter)],
                             all.x=TRUE,
                             by.x="gameplayId",
                             by.y="gameplayId"),
-                  y = possession.nyg,
+                  y = possession.team,
                   all.x = TRUE,
                   by.x = "gameId",
                   by.y = "gameId")
                   
 
-df.nyg.v2 = df.nyg.v1[,.(nflId,
-                         event,
-                         quarter,
-                         adj_x = ifelse(ballfirst == TRUE,
-                                        ifelse(quarter == 2 | quarter == 4,
-                                               ifelse(yardlineSide == "NYG", (160/3)-y, y),
-                                               ifelse(yardlineSide == "NYG", y, (160/3)-y)),
-                                        ifelse(quarter == 2 | quarter == 4,
-                                              ifelse(yardlineSide == "NYG", y, (160/3)-y),
-                                              ifelse(yardlineSide == "NYG", (160/3)-y, y))
-                         ),
-                         adj_y = ifelse(ballfirst == TRUE,
-                                        ifelse(quarter == 2 | quarter == 4,
-                                               ifelse(yardlineSide == "NYG", x, (120)-x),
-                                               ifelse(yardlineSide == "NYG", (120)-x, x)),
-                                        ifelse(quarter == 2 | quarter == 4,
-                                               ifelse(yardlineSide == "NYG", (120)-x, x),
-                                               ifelse(yardlineSide == "NYG", x, (120)-x))),
-                         gameId = as.factor(gameId),
-                         gameplayId)]
+df.team.v2 = df.team.v1[,.(nflId,
+                           event,
+                           quarter,
+                           adj_x = ifelse(ballfirst == TRUE,
+                                          ifelse(quarter == 2 | quarter == 4,
+                                                 ifelse(yardlineSide == teamAbbr, (160/3)-y, y),
+                                                 ifelse(yardlineSide == teamAbbr, y, (160/3)-y)),
+                                          ifelse(quarter == 2 | quarter == 4,
+                                                 ifelse(yardlineSide == teamAbbr, y, (160/3)-y),
+                                                 ifelse(yardlineSide == teamAbbr, (160/3)-y, y))
+                           ),
+                           adj_y = ifelse(ballfirst == TRUE,
+                                          ifelse(quarter == 2 | quarter == 4,
+                                                 ifelse(yardlineSide == teamAbbr, x, (120)-x),
+                                                 ifelse(yardlineSide == teamAbbr, (120)-x, x)),
+                                          ifelse(quarter == 2 | quarter == 4,
+                                                 ifelse(yardlineSide == teamAbbr, (120)-x, x),
+                                                 ifelse(yardlineSide == teamAbbr, x, (120)-x))),
+                           gameId = as.factor(gameId),
+                           gameplayId)]
 
 
 ggplot(df.nyg.v2[event == "kickoff" & nflId == "2556771",], aes(x = adj_x, y = adj_y, color = quarter)) + geom_point()
@@ -115,6 +111,29 @@ ggplot(players.heat, aes(PositionAbbr, College)) +
   scale_fill_manual(values=c("#e0e6ee", "#f4f293", "#0bcd72"))
 
 ## PLAYERS CATCHES
+
+
+
+## TARIK COHEN
+
+cohen = tracking.team[nflId == "2558250" & gameId == "2017091001",]
+ggplot(data = cohen, aes(x = x, y = y, color = event)) +
+  ylim(0, (160/3)) +
+  xlim(0, 120) +
+  geom_vline(xintercept = c(0,10,60,110,120)) +
+  geom_vline(xintercept = c(0,10,60,110,120)) +
+  geom_hline(yintercept = c(0,160/3)) + 
+  annotate("rect", xmin = 0, xmax = 10, ymin = 0, ymax = (160/3), fill = "#0d46bf", alpha = .3) +
+  annotate("rect", xmin = 110, xmax = 120, ymin = 0, ymax = (160/3), fill = "#0d46bf", alpha = .3) +
+  annotate("rect", xmin = 10, xmax = 110, ymin = 0, ymax = (160/3), fill = "green", alpha = .3) +
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.title.y=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks.y=element_blank(),
+        legend.position="bottom") +
+  geom_point()
 
 
 ## FIELD GOALS
