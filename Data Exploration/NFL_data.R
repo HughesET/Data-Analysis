@@ -39,41 +39,46 @@ players[,.N,by=College][order(-N)]
 
 ##$$##$$## DATA CLEAN -- NYG
 
-games.nyg = games[homeTeamAbbr == "NYG" | visitorTeamAbbr == "NYG",]
-games.nyg.loc = games.nyg[,.(gameId, loc = ifelse(homeTeamAbbr == "NYG", "home","away"))]
-games.nyg.ids = games.nyg$gameId
-plays.nyg = plays[gameId %in% games.nyg.ids,]
-tracking.nyg = data.table()
+teamAbbr = "CHI"
+games.team = games[homeTeamAbbr == teamAbbr | visitorTeamAbbr == teamAbbr,]
+games.team.loc = games.team[,.(gameId, loc = ifelse(homeTeamAbbr == teamAbbr, "home","away"))]
+games.team.ids = games.team$gameId
+plays.team = plays[gameId %in% games.team.ids,]
+tracking.team = data.table()
 for (i in 1:length(games.nyg.ids)) {
-  game.id = games.nyg.ids[i]
+  game.id = games.team.ids[i]
   file.tracking = glue("https://raw.githubusercontent.com/nfl-football-ops/Big-Data-Bowl/master/Data/tracking_gameId_{game.id}.csv")
   tracking.temp = fread(file.tracking)
   team.flag = ifelse(tracking.temp$displayName == "football", "football", games.nyg.loc$loc[i])
   tracking.temp$team.flag = team.flag
   tracking.temp$gameplayId = paste(tracking.temp$gameId,tracking.temp$playId,sep="-")
-  
-  tracking.nyg = rbindlist(list(tracking.nyg,tracking.temp))  
+  tracking.team = rbindlist(list(tracking.nyg,tracking.temp))  
 }
 
-players.nyg = merge(x = unique(tracking.nyg[team.flag == team,.(nflId,displayName)]),
+players.team = merge(x = unique(tracking.team[team.flag == team,.(nflId,displayName)]),
                     y = players,
                     all.x = TRUE,
                     by.x = "nflId",
                     by.y = "nflId")
 
+
+# 2558250
+
 ## Clean Data Sets
 
 possession.nyg = plays.nyg[GameClock == "15:00:00" & quarter == 1 & isSTPlay == TRUE,
-                           .(gameId, gameplayId, ballfirst = ifelse(possessionTeam == "NYG", TRUE, FALSE))]
+                           .(gameId, ballfirst = ifelse(possessionTeam == "NYG", FALSE, TRUE))]
 
-df.nyg.v1 = merge(x=tracking.nyg,
-                  y=merge(x=plays.nyg, y=possession.nyg, by.x="gameplayId", by.y="gameplayId")[,.(gameId = gameId.x,
-                                                                                                  quarter,
-                                                                                                  yardlineSide,
-                                                                                                  ballfirst)],
-                  all.x=TRUE,
-                  by.x="gameId",
-                  by.y="gameId")
+df.nyg.v1 = merge(x = merge(x=tracking.nyg,
+                            y=plays.nyg[,.(gameplayId, yardlineSide, quarter)],
+                            all.x=TRUE,
+                            by.x="gameplayId",
+                            by.y="gameplayId"),
+                  y = possession.nyg,
+                  all.x = TRUE,
+                  by.x = "gameId",
+                  by.y = "gameId")
+                  
 
 df.nyg.v2 = df.nyg.v1[,.(nflId,
                          event,
@@ -97,7 +102,7 @@ df.nyg.v2 = df.nyg.v1[,.(nflId,
                          gameplayId)]
 
 
-ggplot(data = df.nyg.v2, aes(x=adj_x, y=adj_y)) + geom_point()
+ggplot(df.nyg.v2[event == "kickoff" & nflId == "2556771",], aes(x = adj_x, y = adj_y, color = quarter)) + geom_point()
 
 ##$$##$$## DATA EXPLORATION
 
